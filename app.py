@@ -15,12 +15,19 @@ import logging
 import csv
 import io
 
+# Azure Storage imports
+from azure.storage.blob import BlobServiceClient, ContentSettings
+from azure.core.exceptions import ResourceNotFoundError
+
 # Import our core functionality from existing modules
 from main import SecFilingDownloader, SEC_API_KEY, OPENAI_API_KEY
 from sec_analyzer import analyze_sec_filing
 
 # Load environment variables - works for both local .env and Azure App Settings
 load_dotenv()  # This loads from .env file if it exists, but won't fail if the file is missing in Azure
+
+# Get Azure Storage connection string
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 
 # Configure logging
 log_dir = "Logs"
@@ -85,32 +92,180 @@ CORS(app)  # Enable CORS for all routes
 # Initialize our SEC filing downloader
 downloader = SecFilingDownloader(SEC_API_KEY)
 
-# Store test results in memory with file-based persistence
-TEST_RESULTS_FILE = "data/test_results.json"
+# Initialize the Azure Blob Storage client
+blob_service_client = None
+if AZURE_STORAGE_CONNECTION_STRING:
+    try:
+        blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
+        logger.info("Azure Blob Storage client initialized")
+        
+        # Ensure the 'data' container exists
+        try:
+            container_client = blob_service_client.get_container_client("data")
+            container_client.get_container_properties()  # Will raise if container doesn't exist
+            logger.info("Azure 'data' container exists")
+        except ResourceNotFoundError:
+            container_client = blob_service_client.create_container("data")
+            logger.info("Created Azure 'data' container")
+    except Exception as e:
+        logger.error(f"Failed to initialize Azure Blob Storage: {str(e)}")
+        blob_service_client = None
+else:
+    logger.warning("AZURE_STORAGE_CONNECTION_STRING not set, using local storage")
 
-# Load saved test results if available
+# File paths for local storage fallback
+TEST_RESULTS_FILE = "data/test_results.json"
+FINE_TUNING_FILE = "data/fine_tuning_data.jsonl"
+
+# Ensure local data directory exists for fallback
+os.makedirs(os.path.dirname(TEST_RESULTS_FILE), exist_ok=True)
+
+# Store test results in memory with persistence
+test_results = []
+
+# Load test results from Azure Blob Storage or local file
 def load_test_results():
+    global test_results
+    
+    # Try to load from Azure Blob Storage first if configured
+    if blob_service_client:
+        try:
+            # Get a blob client for the test results file
+            blob_client = blob_service_client.get_blob_client(
+                container="data", 
+                blob="test_results.json"
+            )
+            
+            # Download and parse the blob
+            download_stream = blob_client.download_blob()
+            file_content = download_stream.readall()
+            
+            if file_content:
+                test_results = json.loads(file_content)
+                logger.info(f"Successfully loaded {len(test_results)} test results from Azure Blob Storage")
+                return test_results
+        except ResourceNotFoundError:
+            logger.info("Test results file not found in Azure Blob Storage, will create a new one")
+        except Exception as e:
+            logger.error(f"Error loading test results from Azure: {str(e)}")
+    
+    # Fall back to local file if Azure fails or is not configured
     if os.path.exists(TEST_RESULTS_FILE):
         try:
             with open(TEST_RESULTS_FILE, "r") as f:
-                return json.load(f)
+                test_results = json.load(f)
+                logger.info(f"Successfully loaded {len(test_results)} test results from local file")
+                return test_results
         except Exception as e:
-            logger.error(f"Error loading test results: {str(e)}")
+            logger.error(f"Error loading test results from local file: {str(e)}")
+    
+    # If all else fails, return an empty list
+    logger.warning("No test results found, starting with empty list")
     return []
 
-# Save test results to file
+# Save test results to Azure Blob Storage or local file
 def save_test_results():
+    # Convert test results to JSON string
+    test_results_json = json.dumps(test_results, indent=2)
+    
+    # Try to save to Azure Blob Storage first if configured
+    if blob_service_client:
+        try:
+            # Get a blob client for the test results file
+            blob_client = blob_service_client.get_blob_client(
+                container="data", 
+                blob="test_results.json"
+            )
+            
+            # Upload the JSON string to the blob
+            blob_client.upload_blob(
+                test_results_json,
+                content_settings=ContentSettings(content_type="application/json"),
+                overwrite=True
+            )
+            
+            logger.info(f"Successfully saved {len(test_results)} test results to Azure Blob Storage")
+            return True
+        except Exception as e:
+            logger.error(f"Error saving test results to Azure: {str(e)}")
+    
+    # Fall back to local file if Azure fails or is not configured
     try:
         with open(TEST_RESULTS_FILE, "w") as f:
-            json.dump(test_results, f, indent=2)
+            f.write(test_results_json)
             f.flush()  # Force flush to disk
-        logger.info(f"Successfully saved {len(test_results)} test results to {TEST_RESULTS_FILE}")
+        logger.info(f"Successfully saved {len(test_results)} test results to local file")
         return True
     except Exception as e:
-        logger.error(f"Error saving test results: {str(e)}")
+        logger.error(f"Error saving test results to local file: {str(e)}")
         return False
 
-# Initialize with saved results or empty list
+# Update fine-tuning data from test results
+def update_fine_tuning_data():
+    # Format specifically for ML fine-tuning or RAG
+    fine_tuning_data = []
+    for result in test_results:
+        if result['status'] == 'success':
+            # Only include successful results
+            ft_entry = {
+                "query": result.get('query', ''),
+                "response": result.get('analysis', ''),
+                "context": result.get('context', ''),
+                "metadata": {
+                    "company": result.get('company', ''),
+                    "formType": result.get('formType', ''),
+                    "year": result.get('year', ''),
+                    "timestamp": result.get('timestamp', '')
+                }
+            }
+            
+            # Add feedback if available
+            if 'feedback' in result:
+                ft_entry["feedback"] = result['feedback']
+            if 'rating' in result:
+                ft_entry["rating"] = result['rating']
+                
+            # Add human feedback flag if rating and feedback exist - useful for RLHF
+            if 'rating' in result and 'feedback' in result and result['feedback'].strip():
+                ft_entry["has_human_feedback"] = True
+                
+            fine_tuning_data.append(ft_entry)
+    
+    # Convert to JSONL (each line is a valid JSON object)
+    jsonl_output = '\n'.join([json.dumps(entry) for entry in fine_tuning_data])
+    
+    # Try to save to Azure Blob Storage first if configured
+    if blob_service_client:
+        try:
+            # Get a blob client for the fine tuning data file
+            blob_client = blob_service_client.get_blob_client(
+                container="data", 
+                blob="fine_tuning_data.jsonl"
+            )
+            
+            # Upload the JSONL string to the blob
+            blob_client.upload_blob(
+                jsonl_output,
+                content_settings=ContentSettings(content_type="application/x-jsonlines"),
+                overwrite=True
+            )
+            
+            logger.info(f"Updated fine tuning data in Azure Blob Storage with {len(fine_tuning_data)} entries")
+            return fine_tuning_data
+        except Exception as e:
+            logger.error(f"Error saving fine tuning data to Azure: {str(e)}")
+    
+    # Fall back to local file if Azure fails or is not configured
+    try:
+        with open(FINE_TUNING_FILE, 'w') as f:
+            f.write(jsonl_output)
+            logger.info(f"Updated fine tuning data in local file with {len(fine_tuning_data)} entries")
+        return fine_tuning_data
+    except Exception as e:
+        logger.error(f"Error saving fine tuning data to local file: {str(e)}")
+        return fine_tuning_data
+
+# Initialize with saved results
 test_results = load_test_results()
 
 # Current log file for reference in test results
@@ -180,11 +335,17 @@ def analyze_filing():
         if isinstance(result, dict):
             # Make the PDF path relative for the frontend
             pdf_path = result['pdf_path']
-            relative_path = os.path.basename(pdf_path)
+            
+            # If pdf_path is a full URL (from Azure Blob Storage), use it directly
+            if pdf_path.startswith('http'):
+                relative_path = pdf_path
+            else:
+                # Otherwise, it's a local file path, so extract just the filename
+                relative_path = f"/api/filings/{os.path.basename(pdf_path)}"
             
             response_data = {
                 "analysis": result['analysis'],
-                "pdfPath": f"/api/filings/{relative_path}",
+                "pdfPath": relative_path,
                 "id": test_id  # Include the test ID in the response
             }
             
@@ -209,7 +370,7 @@ def analyze_filing():
                     "formType": form_type,
                     "year": year,
                     "analysis": result['analysis'],
-                    "pdfPath": f"/api/filings/{relative_path}",
+                    "pdfPath": relative_path,
                     "status": "success",
                     "log_file": current_log_file,
                     "trace_id": trace_id,
@@ -217,7 +378,7 @@ def analyze_filing():
                 }
                 test_results.append(test_result)
             
-            # Save updated test results to file
+            # Save updated test results
             save_test_results()
             
             return jsonify(response_data)
@@ -245,7 +406,7 @@ def analyze_filing():
                 }
                 test_results.append(test_result)
             
-            # Save updated test results to file
+            # Save updated test results
             save_test_results()
                 
             return jsonify(error_response), 500
@@ -274,7 +435,7 @@ def analyze_filing():
             }
             test_results.append(test_result)
             
-            # Save updated test results to file
+            # Save updated test results
             save_test_results()
             
         return jsonify(error_response), 500
@@ -320,8 +481,33 @@ def extract_parameters():
 
 @app.route('/api/filings/<path:filename>')
 def serve_filing(filename):
-    """Serve a filing PDF file."""
-    return send_from_directory('filings', filename)
+    """Serve a filing PDF file from Azure Blob Storage."""
+    if not blob_service_client:
+        logger.error(f"Azure Blob Storage client not initialized, cannot serve file: {filename}")
+        return jsonify({"error": "Azure Storage not configured"}), 500
+        
+    try:
+        blob_client = blob_service_client.get_blob_client(
+            container="filings", 
+            blob=filename
+        )
+        
+        # Download the blob content
+        download_stream = blob_client.download_blob()
+        file_content = download_stream.readall()
+        
+        # Serve the file directly from memory
+        return Response(
+            file_content,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": f"inline; filename={filename}"}
+        )
+    except ResourceNotFoundError:
+        logger.error(f"Filing '{filename}' not found in Azure Blob Storage")
+        return jsonify({"error": f"Filing not found: {filename}"}), 404
+    except Exception as e:
+        logger.error(f"Error accessing filing in Azure Blob Storage: {str(e)}")
+        return jsonify({"error": "Error accessing filing"}), 500
 
 @app.route('/api/feedback', methods=['POST'])
 def collect_feedback():
@@ -341,6 +527,9 @@ def collect_feedback():
                 result['feedback'] = data.get('feedback')
                 result['rating'] = data.get('rating')
                 break
+    
+    # Save updated test results
+    save_test_results()
     
     return jsonify({"status": "Feedback received, thank you!"})
 
@@ -380,7 +569,7 @@ def submit_test_feedback(test_id):
             trace_id = result.get('trace_id', str(uuid.uuid4()))
             traced_logger.set_trace_id(trace_id).info(f"Feedback submitted for test {test_id}: Rating={rating}, Feedback={feedback}")
             
-            # Save updated test results to file
+            # Save updated test results
             save_test_results()
             
             # Update fine_tuning_data.jsonl after feedback submission
@@ -411,7 +600,7 @@ def submit_test_feedback(test_id):
         test_results.append(new_result)
         traced_logger.set_trace_id(new_result['trace_id']).info(f"Created new feedback-only entry with ID {test_id}")
         
-        # Save updated test results to file
+        # Save updated test results
         save_test_results()
         
         # Update fine_tuning_data.jsonl after feedback submission
@@ -420,47 +609,6 @@ def submit_test_feedback(test_id):
     return jsonify({"success": True, "message": "Feedback submitted successfully"})
 
 @app.route('/api/test-results/export', methods=['GET'])
-def update_fine_tuning_data():
-    """Update the fine_tuning_data.jsonl file with current test results."""
-    # Format specifically for ML fine-tuning or RAG
-    fine_tuning_data = []
-    for result in test_results:
-        if result['status'] == 'success':
-            # Only include successful results
-            ft_entry = {
-                "query": result.get('query', ''),
-                "response": result.get('analysis', ''),
-                "context": result.get('context', ''),
-                "metadata": {
-                    "company": result.get('company', ''),
-                    "formType": result.get('formType', ''),
-                    "year": result.get('year', ''),
-                    "timestamp": result.get('timestamp', '')
-                }
-            }
-            
-            # Add feedback if available
-            if 'feedback' in result:
-                ft_entry["feedback"] = result['feedback']
-            if 'rating' in result:
-                ft_entry["rating"] = result['rating']
-                
-            # Add human feedback flag if rating and feedback exist - useful for RLHF
-            if 'rating' in result and 'feedback' in result and result['feedback'].strip():
-                ft_entry["has_human_feedback"] = True
-                
-            fine_tuning_data.append(ft_entry)
-    
-    # Convert to JSONL (each line is a valid JSON object)
-    jsonl_output = '\n'.join([json.dumps(entry) for entry in fine_tuning_data])
-    
-    # Save to the fine_tuning_data.jsonl file
-    with open('data/fine_tuning_data.jsonl', 'w') as f:
-        f.write(jsonl_output)
-        logger.info(f"Updated data/fine_tuning_data.jsonl with {len(fine_tuning_data)} entries")
-    
-    return fine_tuning_data
-
 def export_test_results():
     """Export test results in various formats."""
     format_type = request.args.get('format', 'csv')
@@ -469,7 +617,7 @@ def export_test_results():
         return jsonify(test_results)
     
     elif format_type == 'jsonl' or format_type == 'fine-tuning':
-        # Use the common function to generate fine-tuning data
+        # Use the function to generate fine-tuning data
         fine_tuning_data = update_fine_tuning_data()
         
         # Return the data directly like the JSON export, but with the proper filename
@@ -657,12 +805,16 @@ def test_results_page():
         function submitFeedback() {
             const testId = document.getElementById('testId').value;
             const feedback = document.getElementById('feedbackText').value;
-            const ratingElement = document.querySelector('input[name="rating"]:checked');
             
-            // The problem is here - the original code likely had validation that 
-            // prevented submission if no rating was selected, even though the 
-            // server-side code accepts feedback without ratings
+            // Get the selected rating (this is the fix from legacy)
+            let rating = null;
+            document.querySelectorAll('input[name="rating"]').forEach(radio => {
+                if (radio.checked) {
+                    rating = parseInt(radio.value);
+                }
+            });
             
+            // Submit the feedback without validation
             fetch(`/api/test-results/${testId}/feedback`, {
                 method: 'POST',
                 headers: {
@@ -670,24 +822,15 @@ def test_results_page():
                 },
                 body: JSON.stringify({
                     feedback: feedback,
-                    rating: ratingElement ? parseInt(ratingElement.value) : null
+                    rating: rating
                 })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    closeFeedbackModal();
-                    
-                    // Show temporary success message
-                    const successMsg = document.getElementById('successMessage');
-                    successMsg.style.display = 'block';
-                    
-                    // Hide after 3 seconds
-                    setTimeout(() => {
-                        successMsg.style.display = 'none';
-                    }, 3000);
-                    
-                    loadResults(); // Refresh results to show updated feedback
+                    // Close modal and show success
+                    document.getElementById('feedbackModal').style.display = 'none';
+                    loadResults(); // Refresh the results
                 } else {
                     alert('Error submitting feedback: ' + (data.error || 'Unknown error'));
                 }
