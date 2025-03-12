@@ -12,11 +12,7 @@ from sec_api import QueryApi, PdfGeneratorApi
 from datetime import datetime
 import re
 from typing import Dict, List, Optional, Union
-import logging
-
-# Azure Storage imports
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
 
 # Import Langchain components
 from langchain_community.llms import OpenAI
@@ -38,9 +34,6 @@ load_dotenv()  # This will load from .env file if it exists, but won't fail if t
 SEC_API_KEY = os.getenv("SEC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-
-# Azure Storage connection string
-AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 
 if not SEC_API_KEY:
     raise ValueError("SEC_API_KEY environment variable is not set")
@@ -141,27 +134,6 @@ class SecFilingDownloader:
         self.pdf_generator_api = PdfGeneratorApi(api_key=sec_api_key)
         self.logger.info("[Downloader] SEC API clients initialized")
         
-        # Initialize Azure Blob Storage client if connection string is provided
-        self.blob_service_client = None
-        if AZURE_STORAGE_CONNECTION_STRING:
-            try:
-                self.blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-                self.logger.info("[Downloader] Azure Blob Storage client initialized")
-                
-                # Ensure the 'filings' container exists
-                try:
-                    container_client = self.blob_service_client.get_container_client("filings")
-                    container_client.get_container_properties()  # Will raise if container doesn't exist
-                    self.logger.info("[Downloader] Azure 'filings' container exists")
-                except ResourceNotFoundError:
-                    container_client = self.blob_service_client.create_container("filings")
-                    self.logger.info("[Downloader] Created Azure 'filings' container")
-            except Exception as e:
-                self.logger.error(f"[Downloader] Failed to initialize Azure Blob Storage: {str(e)}")
-                self.blob_service_client = None
-        else:
-            self.logger.warning("[Downloader] AZURE_STORAGE_CONNECTION_STRING not set, using local storage")
-        
         # Initialize LLM for conversation and company lookup
         self.logger.info(f"[Downloader] Initializing LLM model: {OPENAI_MODEL}")
         self.llm = ChatOpenAI(
@@ -215,12 +187,17 @@ class SecFilingDownloader:
             raise
     
     def download_filing_as_pdf(self, sec_url: str, cik: str, form_type: str, year: str, filing_date: str) -> str:
-        """Download filing as PDF and save to Azure Blob Storage or local file."""
+        """Download filing as PDF and save to Azure Storage."""
         log_section_boundary(f"Download Filing As PDF - CIK:{cik}, Form:{form_type}", True)
         
-        # Create a nice filename using the company CIK, form type, and date
-        date_str = filing_date.split('T')[0]
-        output_filename = f"{cik}_{form_type}_{year}_{date_str}.pdf"
+        # Get Azure Storage connection string from environment
+        storage_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        storage_container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "filings")
+        
+        if not storage_connection_string:
+            self.logger.error("[PDF] AZURE_STORAGE_CONNECTION_STRING environment variable is not set")
+            log_section_boundary(f"Download Filing As PDF - CIK:{cik}, Form:{form_type}", False)
+            raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable is not set")
         
         print("Converting filing to PDF format...")
         self.logger.info(f"[PDF] Generating PDF from SEC URL: {sec_url}")
@@ -230,44 +207,31 @@ class SecFilingDownloader:
             pdf_content = self.pdf_generator_api.get_pdf(sec_url)
             self.logger.info(f"[PDF] PDF generated successfully, size: {len(pdf_content)} bytes")
             
-            # Upload to Azure Blob Storage if client is initialized
-            if self.blob_service_client:
-                try:
-                    # Get a blob client for the file
-                    blob_client = self.blob_service_client.get_blob_client(
-                        container="filings",
-                        blob=output_filename
-                    )
-                    
-                    # Upload the PDF content to the blob
-                    blob_client.upload_blob(pdf_content, overwrite=True)
-                    self.logger.info(f"[PDF] PDF uploaded to Azure Blob Storage: {blob_client.url}")
-                    
-                    # Return the blob URL
-                    log_section_boundary(f"Download Filing As PDF - CIK:{cik}, Form:{form_type}", False)
-                    return blob_client.url
-                except Exception as e:
-                    self.logger.error(f"[PDF] Error uploading to Azure Blob Storage: {str(e)}")
-                    # Fall back to local storage if Azure storage fails
-                    self.logger.warning("[PDF] Falling back to local storage")
+            # Create a nice filename using the company CIK, form type, and date
+            date_str = filing_date.split('T')[0]
+            blob_name = f"{cik}_{form_type}_{year}_{date_str}.pdf"
+            self.logger.info(f"[PDF] Preparing to upload as blob: {blob_name}")
             
-            # If Azure Blob Storage is not configured or fails, use local storage
-            output_dir = "filings"
-            os.makedirs(output_dir, exist_ok=True)
-            self.logger.info(f"[PDF] Output directory ensured: {output_dir}")
+            # Initialize the blob service client
+            blob_service_client = BlobServiceClient.from_connection_string(storage_connection_string)
+            container_client = blob_service_client.get_container_client(storage_container_name)
             
-            output_path = os.path.join(output_dir, output_filename)
-            self.logger.info(f"[PDF] Saving PDF to local file: {output_path}")
+            # Create container if it doesn't exist
+            if not container_client.exists():
+                self.logger.info(f"[PDF] Creating container: {storage_container_name}")
+                container_client.create_container()
             
-            # Save the PDF content to a file
-            with open(output_path, "wb") as f:
-                f.write(pdf_content)
+            # Upload to Azure Storage
+            blob_client = container_client.get_blob_client(blob_name)
+            blob_client.upload_blob(pdf_content, overwrite=True)
             
-            self.logger.info(f"[PDF] PDF saved successfully to local file: {output_path}")
+            self.logger.info(f"[PDF] PDF uploaded successfully to Azure Storage: {blob_name}")
             log_section_boundary(f"Download Filing As PDF - CIK:{cik}, Form:{form_type}", False)
-            return output_path
+            
+            # Return just the blob name, as the app.py will construct the URL
+            return blob_name
         except Exception as e:
-            self.logger.error(f"[PDF] Error generating/saving PDF: {str(e)}")
+            self.logger.error(f"[PDF] Error generating/uploading PDF: {str(e)}")
             log_section_boundary(f"Download Filing As PDF - CIK:{cik}, Form:{form_type}", False)
             raise
     
@@ -466,7 +430,7 @@ class SecFilingDownloader:
                 if isinstance(result, dict):
                     print("\nAnalysis Result:")
                     print(result['analysis'])
-                    print(f"\nYou can verify this information in the downloaded filing: {result['pdf_path']}")
+                    print(f"\nYou can verify this information in the downloaded PDF: {result['pdf_path']}")
                 else:
                     print(f"Error: {result}")
             else:
@@ -521,8 +485,8 @@ class SecFilingDownloader:
             self.logger.info("Downloading filing as PDF")
             output_path = self.download_filing_as_pdf(sec_url, cik, form_type, year, filing['filedAt'])
             
-            self.logger.info(f"Filing downloaded successfully: {output_path}")
-            print(f"Successfully downloaded and converted {form_type}: {output_path}")
+            self.logger.info(f"PDF downloaded successfully: {output_path}")
+            print(f"Successfully downloaded and converted {form_type} to PDF: {output_path}")
             
             log_section_boundary(f"Download By Company Name - Company:{company_name}", False)
             return output_path
@@ -585,7 +549,7 @@ def main():
         if isinstance(result, dict):
             print("\nAnalysis Result:")
             print(result['analysis'])
-            print(f"\nYou can verify this information in the downloaded filing: {result['pdf_path']}")
+            print(f"\nYou can verify this information in the downloaded PDF: {result['pdf_path']}")
         else:
             print(f"Error: {result}")
     else:

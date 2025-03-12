@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern SEC Filing Analyzer</title>
+    <title>SEC Filing Analyzer</title>
     <!-- PDF.js library for enhanced PDF rendering -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
     <style>
@@ -17,20 +17,20 @@
             --box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
         
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 0;
-            line-height: 1.5;
-            background-color: #f8f9fa;
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+            line-height: 1.5; 
+            background-color: #f5f7fa;
             color: var(--text-color);
             font-size: 0.85rem; /* Smaller body font size */
         }
         
-        .container {
+        .container { 
             width: 100%;
-            max-width: 1400px;
-            margin: 0 auto;
+            max-width: 1400px; 
+            margin: 0 auto; 
             padding: 5px; /* Reduced padding */
             display: flex;
             flex-direction: column;
@@ -195,7 +195,7 @@
         .message-input input {
             flex: 1;
             padding: 8px;
-            border: 1px solid #ddd;
+            border: 1px solid #ccc;
             border-radius: 24px;
             font-size: 0.8rem; /* Smaller font size */
             transition: border-color 0.3s;
@@ -231,7 +231,7 @@
         
         .new-query-btn {
             display: none;
-            background-color: var(--primary-color);
+            background-color: #27ae60;
             color: white;
             border: none;
             padding: 6px 12px;
@@ -245,7 +245,7 @@
         }
         
         .new-query-btn:hover {
-            background-color: #1e2b3a;
+            background-color: #219653;
         }
         
         .document-viewer {
@@ -303,6 +303,17 @@
             background-color: var(--secondary-color);
             color: white;
             border-color: var(--secondary-color);
+        }
+        
+        .rating-option input[type="radio"] {
+            margin-right: 8px;
+        }
+        
+        .rating-description {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 4px;
+            margin-left: 24px;
         }
         
         .feedback-textarea {
@@ -408,6 +419,11 @@
                     </div>
                 </div>
                 
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <span>Analyzing filing... This may take a moment.</span>
+                </div>
+                
                 <div class="message-input">
                     <input type="text" id="userInput" placeholder="Ask about a company's SEC filing..." />
                     <button id="sendButton">Send</button>
@@ -416,25 +432,19 @@
                 <!-- New query button -->
                 <button id="newQueryButton" class="new-query-btn">New Query</button>
                 
-                <!-- Loading indicator -->
-                <div id="loading" class="loading">
-                    <div class="spinner"></div>
-                    <span>Analyzing filing... This may take a moment.</span>
-                </div>
-                
                 <!-- Feedback section -->
                 <div id="feedbackContainer" class="feedback-container">
                     <h3 style="font-size: 0.9rem;">How was this analysis?</h3>
                     <div class="rating-options">
-                        <div class="rating-option" onclick="setRating(1)">
+                        <div class="rating-option">
                             <input type="radio" id="rating1" name="rating" value="1">
                             <label for="rating1">Incorrect</label>
                         </div>
-                        <div class="rating-option" onclick="setRating(2)">
+                        <div class="rating-option">
                             <input type="radio" id="rating2" name="rating" value="2">
                             <label for="rating2">Partially Correct</label>
                         </div>
-                        <div class="rating-option" onclick="setRating(3)">
+                        <div class="rating-option">
                             <input type="radio" id="rating3" name="rating" value="3">
                             <label for="rating3">Spot On</label>
                         </div>
@@ -484,41 +494,41 @@
                 queryCompleted: false
             };
             
-            function setRating(rating) {
-                currentState.currentRating = rating;
-                document.querySelectorAll('.rating-option').forEach(option => option.classList.remove('selected'));
-                document.querySelector(`.rating-option:nth-child(${rating})`).classList.add('selected');
-                document.getElementById(`rating${rating}`).checked = true;
-            }
-            
-            window.insertQuery = function(query) {
-                userInput.value = query;
-                userInput.focus();
-            };
-            
+            // Add a user message to the chat
             function addUserMessage(message) {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message user-message';
                 messageDiv.textContent = message;
+                
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';
                 timeDiv.textContent = 'Just now';
                 messageDiv.appendChild(timeDiv);
+                
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
             
+            // Add a bot message to the chat
             function addBotMessage(message) {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message bot-message';
                 messageDiv.textContent = message;
+                
                 const timeDiv = document.createElement('div');
                 timeDiv.className = 'message-time';
                 timeDiv.textContent = 'Just now';
                 messageDiv.appendChild(timeDiv);
+                
                 chatMessages.appendChild(messageDiv);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
+            
+            // Insert sample query
+            window.insertQuery = function(query) {
+                userInput.value = query;
+                userInput.focus();
+            };
             
             // Extract parameters from the query
             async function extractParameters(query) {
@@ -541,6 +551,154 @@
                     addBotMessage('Sorry, I had trouble understanding your query. Please try again.');
                     return null;
                 }
+            }
+            
+            // Analyze the filing
+            async function analyzeFiling(query, company, formType, year) {
+                try {
+                    loading.style.display = 'flex';
+                    
+                    // Hide feedback container while loading
+                    feedbackContainer.style.display = 'none';
+                    
+                    // Generate a unique test ID
+                    const testId = 'test-' + Date.now();
+                    
+                    const response = await fetch('/api/filing/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            query: query,
+                            company: company,
+                            formType: formType,
+                            year: year,
+                            testId: testId
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Failed to analyze filing');
+                    }
+                    
+                    // Hide loading animation
+                    loading.style.display = 'none';
+                    
+                    const result = await response.json();
+                    
+                    // Add the analysis result as a bot message
+                    addBotMessage(result.analysis);
+                    
+                    // Display the PDF
+                    pdfPlaceholder.style.display = 'none';
+                    pdfViewer.style.display = 'flex';
+                    pdfFrame.src = result.pdfPath;
+                    
+                    // Show the feedback container
+                    feedbackContainer.style.display = 'block';
+                    
+                    // Store test ID if available
+                    if (result.id) {
+                        currentState.currentTestId = result.id;
+                    } else {
+                        // Generate a test ID if not provided
+                        currentState.currentTestId = testId;
+                    }
+                    
+                    // Mark query as completed and update UI
+                    currentState.queryCompleted = true;
+                    sendButton.classList.add('disabled');
+                    sendButton.disabled = true;
+                    userInput.disabled = true;
+                    newQueryButton.style.display = 'block';
+                    
+                    // Add a message explaining one-and-done approach
+                    addBotMessage("I've completed your query. Click 'New Query' to ask another question.");
+                    
+                    return result;
+                    
+                } catch (error) {
+                    // Hide loading animation on error
+                    loading.style.display = 'none';
+                    
+                    console.error('Error analyzing filing:', error);
+                    addBotMessage('Sorry, I had trouble analyzing the filing. Please try again or try a different query.');
+                    return null;
+                }
+            }
+            
+            // Process the user's message
+            async function processUserMessage(message) {
+                if (!message.trim()) {
+                    return;
+                }
+                
+                // Add the user's message to the chat
+                addUserMessage(message);
+                
+                // If we're waiting for confirmation
+                if (currentState.company && currentState.formType && currentState.year && currentState.query && !currentState.confirmed) {
+                    if (message.toLowerCase().includes('yes') || message.toLowerCase().includes('correct')) {
+                        currentState.confirmed = true;
+                        addBotMessage(`Great! I'll analyze ${currentState.company}'s ${currentState.year} ${currentState.formType} for information about ${currentState.query}. This may take a moment...`);
+                        
+                        // Analyze the filing
+                        await analyzeFiling(currentState.query, currentState.company, currentState.formType, currentState.year);
+                    } else {
+                        // Reset if they didn't confirm
+                        currentState = {
+                            company: null,
+                            formType: null,
+                            year: null,
+                            query: null,
+                            confirmed: false,
+                            currentTestId: null,
+                            currentRating: 0,
+                            queryCompleted: false
+                        };
+                        addBotMessage("Okay, let's try again. What would you like to know?");
+                    }
+                    return;
+                }
+                
+                // Extract parameters for a new query
+                const params = await extractParameters(message);
+                
+                if (!params) {
+                    return;
+                }
+                
+                currentState.company = params.company;
+                currentState.formType = params.formType || '10-K';
+                
+                // Handle 'latest' in the query
+                if (message.toLowerCase().includes('latest') && !params.year) {
+                    const currentYear = new Date().getFullYear();
+                    currentState.year = currentYear.toString();
+                } else {
+                    currentState.year = params.year;
+                }
+                
+                currentState.query = message;
+                
+                // Check if we have all required parameters
+                if (!currentState.company) {
+                    addBotMessage("I couldn't identify which company you're asking about. Could you please specify the company name?");
+                    return;
+                }
+                
+                if (!currentState.year) {
+                    addBotMessage(`Which year's filing would you like to see for ${currentState.company}?`);
+                    return;
+                }
+                
+                // Confirm parameters with the user
+                const confirmMessage = `I'll search for information about "${currentState.query}" in ${currentState.company}'s ${currentState.year} ${currentState.formType}. Is that correct?`;
+                addBotMessage(confirmMessage);
+                
+                // Wait for user confirmation before proceeding
             }
             
             // Reset conversation state and UI
@@ -568,164 +726,59 @@
                 // Hide feedback container
                 feedbackContainer.style.display = 'none';
                 
-                // Clear any active rating
-                document.querySelectorAll('.rating-option').forEach(option => {
-                    option.classList.remove('selected');
-                });
-                document.getElementById('feedbackText').value = '';
+                // Reset PDF display
+                pdfPlaceholder.style.display = 'flex';
+                pdfViewer.style.display = 'none';
                 
                 // Add a message to indicate reset
                 addBotMessage("I'm ready for a new question. What would you like to know?");
             }
             
-            // Analyze the filing
-            async function analyzeFiling(query, company, formType, year) {
-                try {
-                    // Show loading animation
-                    loading.style.display = 'flex';
-                    
-                    // Hide feedback container while loading
-                    feedbackContainer.style.display = 'none';
-                    
-                    // Generate a unique test ID
-                    const testId = 'test-' + Date.now();
-                    
-                    const response = await fetch('/api/filing/analyze', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            query: query,
-                            company: company,
-                            formType: formType,
-                            year: year,
-                            testId: testId
-                        }),
+            // Set rating
+            function setRating(rating) {
+                currentState.currentRating = rating;
+                
+                // If rating is 0, just uncheck all radio buttons
+                if (rating === 0) {
+                    document.querySelectorAll('input[name="rating"]').forEach(radio => {
+                        radio.checked = false;
                     });
                     
-                    if (!response.ok) {
-                        throw new Error('Failed to analyze filing');
-                    }
-                    
-                    // Hide loading animation
-                    loading.style.display = 'none';
-                    
-                    const data = await response.json();
-                    
-                    // Save the test ID for feedback
-                    currentState.currentTestId = data.id;
-                    currentState.queryCompleted = true;
-                    
-                    // Display the analysis
-                    addBotMessage(data.analysis);
-                    
-                    // Show the PDF
-                    if (data.pdfPath) {
-                        pdfPlaceholder.style.display = 'none';
-                        pdfViewer.style.display = 'flex';
-                        pdfFrame.src = data.pdfPath;
-                    }
-                    
-                    // Show the feedback container
-                    feedbackContainer.style.display = 'block';
-                    
-                    // Mark query as completed and update UI
-                    currentState.queryCompleted = true;
-                    sendButton.classList.add('disabled');
-                    sendButton.disabled = true;
-                    userInput.disabled = true;
-                    newQueryButton.style.display = 'block';
-                    
-                    // Add a message explaining one-and-done approach
-                    addBotMessage("I've completed your query. Click 'New Query' to ask another question.");
-                    
-                    return data;
-                } catch (error) {
-                    // Hide loading animation on error
-                    loading.style.display = 'none';
-                    
-                    console.error('Error analyzing filing:', error);
-                    addBotMessage('Sorry, I had trouble analyzing the filing. Please try again or try a different query.');
-                    return null;
+                    document.querySelectorAll('.rating-option').forEach(option => {
+                        option.classList.remove('selected');
+                    });
+                    return;
+                }
+                
+                // Update radio button
+                document.querySelectorAll('input[name="rating"]').forEach(radio => {
+                    radio.checked = false;
+                });
+                
+                const radioToCheck = document.querySelector(`input[name="rating"][value="${rating}"]`);
+                if (radioToCheck) {
+                    radioToCheck.checked = true;
+                }
+                
+                // Update the visuals
+                document.querySelectorAll('.rating-option').forEach(option => {
+                    option.classList.remove('selected');
+                });
+                
+                const optionToSelect = document.querySelector(`.rating-option:nth-child(${rating})`);
+                if (optionToSelect) {
+                    optionToSelect.classList.add('selected');
                 }
             }
             
-            // Process the user's message
-            async function processUserMessage(message) {
-                if (!message.trim()) {
-                    return;
-                }
-                
-                // Clear the input
-                userInput.value = '';
-                
-                // Add the user's message to the chat
-                addUserMessage(message);
-                
-                // If we've already got parameters, use them directly
-                if (currentState.confirmed) {
-                    await analyzeFiling(
-                        message,
-                        currentState.company,
-                        currentState.formType,
-                        currentState.year
-                    );
-                    return;
-                }
-                
-                // Process confirmation responses like "yes"
-                if (/^yes$/i.test(message.trim()) && currentState.company) {
-                    currentState.confirmed = true;
-                    addBotMessage(`Great! I'll analyze ${currentState.company}'s ${currentState.year} ${currentState.formType} for information about ${currentState.query}. This may take a moment...`);
-                    
-                    await analyzeFiling(
-                        currentState.query,
-                        currentState.company,
-                        currentState.formType,
-                        currentState.year
-                    );
-                    return;
-                }
-                
-                // Extract parameters for a new query
-                const params = await extractParameters(message);
-                
-                if (!params) {
-                    return;
-                }
-                
-                currentState.company = params.company;
-                currentState.formType = params.formType || '10-K';
-                
-                // Handle 'latest' in the query
-                if (message.toLowerCase().includes('latest') && !params.year) {
-                    const currentYear = new Date().getFullYear();
-                    currentState.year = currentYear.toString();
-                } else {
-                    currentState.year = params.year || new Date().getFullYear().toString();
-                }
-                
-                currentState.query = message;
-                
-                // Check if we have all required parameters
-                if (!currentState.company) {
-                    addBotMessage("I couldn't identify which company you're asking about. Could you please specify the company name?");
-                    return;
-                }
-                
-                // Confirm parameters with the user
-                let yearText = currentState.year;
-                if (message.toLowerCase().includes('latest')) {
-                    yearText = "the latest available year";
-                }
-                
-                const confirmMessage = `I'll look for ${currentState.company}'s ${currentState.formType} filing from ${yearText}. Is that correct?`;
-                addBotMessage(confirmMessage);
-                
-                // Wait for user confirmation before proceeding
-            }
+            // Rating option click handlers
+            document.querySelectorAll('.rating-option').forEach((option, index) => {
+                option.addEventListener('click', function() {
+                    setRating(index + 1);
+                });
+            });
             
+            // Event listener for send button
             sendButton.addEventListener('click', function() {
                 if (!currentState.queryCompleted) {
                     processUserMessage(userInput.value);
@@ -733,6 +786,7 @@
                 }
             });
             
+            // Event listener for enter key in input field
             userInput.addEventListener('keypress', function(e) {
                 if (e.key === 'Enter' && !currentState.queryCompleted) {
                     processUserMessage(userInput.value);
@@ -741,52 +795,72 @@
             });
             
             // Event listener for new query button
+            const newQueryButton = document.getElementById('newQueryButton');
             newQueryButton.addEventListener('click', function() {
                 resetConversation();
             });
             
             // Submit feedback
-            async function submitFeedback(rating, feedback) {
-                if (!currentState.currentTestId) {
+            document.getElementById('submitFeedback').addEventListener('click', async function() {
+                const feedback = document.getElementById('feedbackText').value;
+                const rating = currentState.currentRating;
+                const testId = currentState.currentTestId;
+                
+                if (!testId) {
+                    alert('No analysis to provide feedback on');
                     return;
                 }
                 
                 try {
-                    const response = await fetch('/api/filing/feedback', {
+                    const response = await fetch(`/api/test-results/${testId}/feedback`, {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json',
+                            'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            testId: currentState.currentTestId,
-                            rating: rating,
-                            feedback: feedback
-                        }),
+                            feedback: feedback,
+                            rating: rating
+                        })
                     });
                     
-                    if (!response.ok) {
-                        throw new Error('Failed to submit feedback');
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Create a simple toast notification that disappears after 3 seconds
+                        const toast = document.createElement('div');
+                        toast.textContent = 'Thank you for your feedback!';
+                        toast.style.position = 'fixed';
+                        toast.style.top = '20px';
+                        toast.style.left = '50%';
+                        toast.style.transform = 'translateX(-50%)';
+                        toast.style.background = '#27ae60';
+                        toast.style.color = '#fff';
+                        toast.style.padding = '10px 20px';
+                        toast.style.borderRadius = '4px';
+                        toast.style.zIndex = '1000';
+                        document.body.appendChild(toast);
+                        
+                        // Remove toast after 3 seconds
+                        setTimeout(() => {
+                            document.body.removeChild(toast);
+                        }, 3000);
+                        
+                        // Hide feedback container and reset fields
+                        feedbackContainer.style.display = 'none';
+                        currentState.currentRating = 0;
+                        document.querySelectorAll('input[name="rating"]').forEach(radio => {
+                            radio.checked = false;
+                        });
+                        document.querySelectorAll('.rating-option').forEach(option => {
+                            option.classList.remove('selected');
+                        });
+                        document.getElementById('feedbackText').value = '';
+                    } else {
+                        alert('Error submitting feedback: ' + (result.error || 'Unknown error'));
                     }
-                    
-                    // Hide the feedback container
-                    feedbackContainer.style.display = 'none';
-                    
-                    // Thank the user
-                    addBotMessage('Thank you for your feedback!');
-                    
                 } catch (error) {
                     console.error('Error submitting feedback:', error);
-                    addBotMessage('Sorry, I had trouble submitting your feedback.');
-                }
-            }
-            
-            document.getElementById('submitFeedback').addEventListener('click', function() {
-                const feedback = document.getElementById('feedbackText').value;
-                const rating = currentState.currentRating;
-                if (rating > 0) {
-                    submitFeedback(rating, feedback);
-                } else {
-                    alert('Please select a rating before submitting.');
+                    alert('Error submitting feedback: ' + error.message);
                 }
             });
         });

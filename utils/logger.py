@@ -80,6 +80,11 @@ class AzureBlobHandler(logging.Handler):
             sys.stderr.write(f"Error writing to Azure log: {str(e)}\n")
             raise
 
+    def close(self):
+        """Flush any remaining logs and close the handler."""
+        self.flush()
+        super().close()
+
 def get_logger(log_dir="logs"):
     """
     Get a configured logger instance that writes to Azure Blob Storage.

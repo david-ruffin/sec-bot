@@ -481,33 +481,39 @@ def extract_parameters():
 
 @app.route('/api/filings/<path:filename>')
 def serve_filing(filename):
-    """Serve a filing PDF file from Azure Blob Storage."""
-    if not blob_service_client:
-        logger.error(f"Azure Blob Storage client not initialized, cannot serve file: {filename}")
-        return jsonify({"error": "Azure Storage not configured"}), 500
-        
+    """Serve a filing PDF file from Azure Storage."""
+    import io
+    from flask import send_file
+    
+    storage_connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+    storage_container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "filings")
+    
     try:
-        blob_client = blob_service_client.get_blob_client(
-            container="filings", 
-            blob=filename
-        )
+        # Initialize Azure client
+        from azure.storage.blob import BlobServiceClient
+        
+        # Get the blob client
+        blob_service_client = BlobServiceClient.from_connection_string(storage_connection_string)
+        container_client = blob_service_client.get_container_client(storage_container_name)
+        blob_client = container_client.get_blob_client(filename)
         
         # Download the blob content
-        download_stream = blob_client.download_blob()
-        file_content = download_stream.readall()
+        data = blob_client.download_blob().readall()
         
-        # Serve the file directly from memory
-        return Response(
-            file_content,
-            mimetype="application/pdf",
-            headers={"Content-Disposition": f"inline; filename={filename}"}
+        # Create a file-like object from the data
+        file_like_object = io.BytesIO(data)
+        
+        # Send the file directly
+        return send_file(
+            file_like_object,
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=filename
         )
-    except ResourceNotFoundError:
-        logger.error(f"Filing '{filename}' not found in Azure Blob Storage")
-        return jsonify({"error": f"Filing not found: {filename}"}), 404
+        
     except Exception as e:
-        logger.error(f"Error accessing filing in Azure Blob Storage: {str(e)}")
-        return jsonify({"error": "Error accessing filing"}), 500
+        logger.error(f"Error serving file: {str(e)}")
+        return jsonify({"error": "Could not access file"}), 500
 
 @app.route('/api/feedback', methods=['POST'])
 def collect_feedback():
