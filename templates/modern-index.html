@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern SEC Filing Analyzer</title>
+    <!-- PDF.js library for enhanced PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --tertiary-color: #ecf0f1;
+            --text-color: #333333;
+            --light-text: #f8f9fa;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            line-height: 1.5;
+            background-color: #f8f9fa;
+            color: var(--text-color);
+            font-size: 0.85rem; /* Smaller body font size */
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 5px; /* Reduced padding */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        
+        header {
+            background-color: var(--primary-color);
+            color: var(--light-text);
+            padding: 0.5rem; /* Smaller padding */
+            border-radius: var(--border-radius);
+            margin-bottom: 5px; /* Reduced margin */
+            box-shadow: var(--box-shadow);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        header h1 {
+            margin: 0;
+            font-size: 1.2rem; /* Smaller font size */
+        }
+        
+        .header-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .button {
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .button:hover {
+            background-color: #2980b9;
+        }
+        
+        .sample-queries {
+            display: flex;
+            flex-direction: row;
+            gap: 5px; /* Tighter gap */
+            margin-bottom: 5px;
+            padding: 5px; /* Reduced padding */
+            background-color: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+        
+        .sample-queries h3 {
+            margin: 0;
+            font-size: 0.9rem; /* Smaller font size */
+            color: var(--primary-color);
+        }
+        
+        .sample-queries ul {
+            display: flex;
+            gap: 5px; /* Tighter gap */
+            padding: 0;
+            list-style: none;
+            margin: 0;
+        }
+        
+        .sample-queries li {
+            background-color: var(--tertiary-color);
+            padding: 4px 8px; /* Smaller padding */
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.7rem; /* Smaller font size */
+            transition: background-color 0.3s;
+        }
+        
+        .sample-queries li:hover {
+            background-color: #d6e4ff;
+        }
+        
+        .content {
+            display: flex;
+            flex: 1;
+            gap: 10px; /* Reduced gap */
+            margin-bottom: 5px;
+        }
+        
+        .chat-panel, .document-panel {
+            flex: 1;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            padding: 10px; /* Reduced padding */
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #eaeaea;
+        }
+        
+        .panel-header h2 {
+            margin: 0;
+            font-size: 1.1rem; /* Smaller font size */
+            color: var(--primary-color);
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #e1e4e8;
+            border-radius: var(--border-radius);
+            padding: 8px; /* Reduced padding */
+            margin-bottom: 8px;
+            background-color: #f9f9f9;
+            font-size: 0.8rem; /* Smaller font size */
+        }
+        
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 80%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            position: relative;
+            line-height: 1.4;
+        }
+        
+        .message-time {
+            font-size: 0.65rem;
+            color: #888;
+            margin-top: 4px;
+            text-align: right;
+        }
+        
+        .user-message {
+            background-color: #dcf8c6;
+            margin-left: auto;
+            border-top-right-radius: 4px;
+        }
+        
+        .bot-message {
+            background-color: white;
+            border-top-left-radius: 4px;
+            border-left: 4px solid var(--secondary-color);
+        }
+        
+        .message-input {
+            display: flex;
+            gap: 8px;
+            margin-top: auto;
+        }
+        
+        .message-input input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 24px;
+            font-size: 0.8rem; /* Smaller font size */
+            transition: border-color 0.3s;
+            outline: none;
+        }
+        
+        .message-input input:focus {
+            border-color: var(--secondary-color);
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+        }
+        
+        .message-input button {
+            padding: 8px 16px;
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem; /* Smaller font size */
+            transition: background-color 0.3s;
+        }
+        
+        .message-input button:hover {
+            background-color: #2980b9;
+        }
+        
+        .message-input button.disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .new-query-btn {
+            display: none;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            margin-top: 10px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: background-color 0.3s;
+            width: 100%;
+        }
+        
+        .new-query-btn:hover {
+            background-color: #1e2b3a;
+        }
+        
+        .document-viewer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: #f1f1f1;
+        }
+        
+        .placeholder {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            background-color: #f8f9fa;
+            border: 1px dashed #ccc;
+            border-radius: var(--border-radius);
+            text-align: center;
+        }
+        
+        .feedback-container {
+            display: none;
+            margin-top: 8px;
+            background-color: #f0f7ff;
+            border-radius: var(--border-radius);
+            padding: 8px;
+            border: 1px solid #d0e1f9;
+        }
+        
+        .rating-options {
+            display: flex;
+            gap: 8px;
+            margin: 8px 0;
+            flex-wrap: wrap;
+        }
+        
+        .rating-option {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 20px;
+            border: 1px solid #ddd;
+            transition: all 0.2s;
+            font-size: 0.7rem; /* Smaller font size */
+        }
+        
+        .rating-option:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .rating-option.selected {
+            background-color: var(--secondary-color);
+            color: white;
+            border-color: var(--secondary-color);
+        }
+        
+        .feedback-textarea {
+            width: 100%;
+            height: 60px; /* Smaller height */
+            margin: 8px 0;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            font-family: inherit;
+            resize: vertical;
+            font-size: 0.8rem;
+        }
+        
+        .feedback-btn {
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: background-color 0.3s;
+        }
+        
+        .feedback-btn:hover {
+            background-color: #2980b9;
+        }
+        
+        /* Loading animation */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 8px;
+            color: #666;
+            background-color: #f8f9fa;
+            border-radius: var(--border-radius);
+            margin: 8px 0;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--secondary-color);
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+            }
+            
+            .chat-panel, .document-panel {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SEC Filing Analyzer</h1>
+            <div class="header-buttons">
+                <a href="/test-results" class="button">Test Results</a>
+                <a href="/legacy" class="button">Original Version</a>
+            </div>
+        </header>
+        
+        <!-- Sample queries section -->
+        <div class="sample-queries">
+            <h3>Sample Queries</h3>
+            <ul>
+                <li onclick="insertQuery(this.textContent)">What are Apple's risk factors in their 2023 10-K?</li>
+                <li onclick="insertQuery(this.textContent)">Tell me about Microsoft's revenue for 2022</li>
+                <li onclick="insertQuery(this.textContent)">What does Tesla say about competition in their latest 10-K?</li>
+            </ul>
+        </div>
+        
+        <div class="content">
+            <!-- Chat panel -->
+            <div class="chat-panel">
+                <div class="panel-header">
+                    <h2>Chat Interface</h2>
+                </div>
+                
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message bot-message">
+                        Hello! I'm an SEC filing analyzer. How can I help you today?
+                        <div class="message-time">Just now</div>
+                    </div>
+                </div>
+                
+                <div class="message-input">
+                    <input type="text" id="userInput" placeholder="Ask about a company's SEC filing..." />
+                    <button id="sendButton">Send</button>
+                </div>
+                
+                <!-- New query button -->
+                <button id="newQueryButton" class="new-query-btn">New Query</button>
+                
+                <!-- Loading indicator -->
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <span>Analyzing filing... This may take a moment.</span>
+                </div>
+                
+                <!-- Feedback section -->
+                <div id="feedbackContainer" class="feedback-container">
+                    <h3 style="font-size: 0.9rem;">How was this analysis?</h3>
+                    <div class="rating-options">
+                        <div class="rating-option" onclick="setRating(1)">
+                            <input type="radio" id="rating1" name="rating" value="1">
+                            <label for="rating1">Incorrect</label>
+                        </div>
+                        <div class="rating-option" onclick="setRating(2)">
+                            <input type="radio" id="rating2" name="rating" value="2">
+                            <label for="rating2">Partially Correct</label>
+                        </div>
+                        <div class="rating-option" onclick="setRating(3)">
+                            <input type="radio" id="rating3" name="rating" value="3">
+                            <label for="rating3">Spot On</label>
+                        </div>
+                    </div>
+                    <textarea id="feedbackText" class="feedback-textarea" placeholder="Provide additional feedback..."></textarea>
+                    <button id="submitFeedback" class="feedback-btn">Submit Feedback</button>
+                </div>
+            </div>
+            
+            <!-- Document panel -->
+            <div class="document-panel">
+                <div class="panel-header">
+                    <h2>Filing Document</h2>
+                </div>
+                
+                <div class="placeholder" id="pdfPlaceholder" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #888; background-color: #f5f5f5; border-radius: 8px; text-align: center; padding: 20px;">
+                    <i style="font-size: 48px; margin-bottom: 10px;">📄</i>
+                    <p style="font-style: italic; font-size: 0.8rem;">The filing document will appear here after your query.</p>
+                </div>
+                
+                <div id="pdfViewer" class="document-viewer" style="display: none; flex: 1;">
+                    <iframe id="pdfFrame" src="" style="width: 100%; height: 100%; border: none;"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const chatMessages = document.getElementById('chatMessages');
+            const userInput = document.getElementById('userInput');
+            const sendButton = document.getElementById('sendButton');
+            const pdfPlaceholder = document.getElementById('pdfPlaceholder');
+            const pdfViewer = document.getElementById('pdfViewer');
+            const pdfFrame = document.getElementById('pdfFrame');
+            const loading = document.getElementById('loading');
+            const feedbackContainer = document.getElementById('feedbackContainer');
+            
+            let currentState = { 
+                company: null,
+                formType: null,
+                year: null,
+                query: null,
+                confirmed: false,
+                currentTestId: null,
+                currentRating: 0,
+                queryCompleted: false
+            };
+            
+            function setRating(rating) {
+                currentState.currentRating = rating;
+                document.querySelectorAll('.rating-option').forEach(option => option.classList.remove('selected'));
+                document.querySelector(`.rating-option:nth-child(${rating})`).classList.add('selected');
+                document.getElementById(`rating${rating}`).checked = true;
+            }
+            
+            window.insertQuery = function(query) {
+                userInput.value = query;
+                userInput.focus();
+            };
+            
+            function addUserMessage(message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message user-message';
+                messageDiv.textContent = message;
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = 'Just now';
+                messageDiv.appendChild(timeDiv);
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            function addBotMessage(message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message bot-message';
+                messageDiv.textContent = message;
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = 'Just now';
+                messageDiv.appendChild(timeDiv);
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            // Extract parameters from the query
+            async function extractParameters(query) {
+                try {
+                    const response = await fetch('/api/filing/extract', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ query: query }),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to extract parameters');
+                    }
+                    
+                    return await response.json();
+                } catch (error) {
+                    console.error('Error extracting parameters:', error);
+                    addBotMessage('Sorry, I had trouble understanding your query. Please try again.');
+                    return null;
+                }
+            }
+            
+            // Reset conversation state and UI
+            function resetConversation() {
+                // Reset state
+                currentState = { 
+                    company: null,
+                    formType: null,
+                    year: null,
+                    query: null,
+                    confirmed: false,
+                    currentTestId: null,
+                    currentRating: 0,
+                    queryCompleted: false
+                };
+                
+                // Enable input and send button
+                userInput.disabled = false;
+                sendButton.disabled = false;
+                sendButton.classList.remove('disabled');
+                
+                // Hide new query button
+                newQueryButton.style.display = 'none';
+                
+                // Hide feedback container
+                feedbackContainer.style.display = 'none';
+                
+                // Clear any active rating
+                document.querySelectorAll('.rating-option').forEach(option => {
+                    option.classList.remove('selected');
+                });
+                document.getElementById('feedbackText').value = '';
+                
+                // Add a message to indicate reset
+                addBotMessage("I'm ready for a new question. What would you like to know?");
+            }
+            
+            // Analyze the filing
+            async function analyzeFiling(query, company, formType, year) {
+                try {
+                    // Show loading animation
+                    loading.style.display = 'flex';
+                    
+                    // Hide feedback container while loading
+                    feedbackContainer.style.display = 'none';
+                    
+                    // Generate a unique test ID
+                    const testId = 'test-' + Date.now();
+                    
+                    const response = await fetch('/api/filing/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            query: query,
+                            company: company,
+                            formType: formType,
+                            year: year,
+                            testId: testId
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to analyze filing');
+                    }
+                    
+                    // Hide loading animation
+                    loading.style.display = 'none';
+                    
+                    const data = await response.json();
+                    
+                    // Save the test ID for feedback
+                    currentState.currentTestId = data.id;
+                    currentState.queryCompleted = true;
+                    
+                    // Display the analysis
+                    addBotMessage(data.analysis);
+                    
+                    // Show the PDF
+                    if (data.pdfPath) {
+                        pdfPlaceholder.style.display = 'none';
+                        pdfViewer.style.display = 'flex';
+                        pdfFrame.src = data.pdfPath;
+                    }
+                    
+                    // Show the feedback container
+                    feedbackContainer.style.display = 'block';
+                    
+                    // Mark query as completed and update UI
+                    currentState.queryCompleted = true;
+                    sendButton.classList.add('disabled');
+                    sendButton.disabled = true;
+                    userInput.disabled = true;
+                    newQueryButton.style.display = 'block';
+                    
+                    // Add a message explaining one-and-done approach
+                    addBotMessage("I've completed your query. Click 'New Query' to ask another question.");
+                    
+                    return data;
+                } catch (error) {
+                    // Hide loading animation on error
+                    loading.style.display = 'none';
+                    
+                    console.error('Error analyzing filing:', error);
+                    addBotMessage('Sorry, I had trouble analyzing the filing. Please try again or try a different query.');
+                    return null;
+                }
+            }
+            
+            // Process the user's message
+            async function processUserMessage(message) {
+                if (!message.trim()) {
+                    return;
+                }
+                
+                // Clear the input
+                userInput.value = '';
+                
+                // Add the user's message to the chat
+                addUserMessage(message);
+                
+                // If we've already got parameters, use them directly
+                if (currentState.confirmed) {
+                    await analyzeFiling(
+                        message,
+                        currentState.company,
+                        currentState.formType,
+                        currentState.year
+                    );
+                    return;
+                }
+                
+                // Process confirmation responses like "yes"
+                if (/^yes$/i.test(message.trim()) && currentState.company) {
+                    currentState.confirmed = true;
+                    addBotMessage(`Great! I'll analyze ${currentState.company}'s ${currentState.year} ${currentState.formType} for information about ${currentState.query}. This may take a moment...`);
+                    
+                    await analyzeFiling(
+                        currentState.query,
+                        currentState.company,
+                        currentState.formType,
+                        currentState.year
+                    );
+                    return;
+                }
+                
+                // Extract parameters for a new query
+                const params = await extractParameters(message);
+                
+                if (!params) {
+                    return;
+                }
+                
+                currentState.company = params.company;
+                currentState.formType = params.formType || '10-K';
+                
+                // Handle 'latest' in the query
+                if (message.toLowerCase().includes('latest') && !params.year) {
+                    const currentYear = new Date().getFullYear();
+                    currentState.year = currentYear.toString();
+                } else {
+                    currentState.year = params.year || new Date().getFullYear().toString();
+                }
+                
+                currentState.query = message;
+                
+                // Check if we have all required parameters
+                if (!currentState.company) {
+                    addBotMessage("I couldn't identify which company you're asking about. Could you please specify the company name?");
+                    return;
+                }
+                
+                // Confirm parameters with the user
+                let yearText = currentState.year;
+                if (message.toLowerCase().includes('latest')) {
+                    yearText = "the latest available year";
+                }
+                
+                const confirmMessage = `I'll look for ${currentState.company}'s ${currentState.formType} filing from ${yearText}. Is that correct?`;
+                addBotMessage(confirmMessage);
+                
+                // Wait for user confirmation before proceeding
+            }
+            
+            sendButton.addEventListener('click', function() {
+                if (!currentState.queryCompleted) {
+                    processUserMessage(userInput.value);
+                    userInput.value = '';
+                }
+            });
+            
+            userInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !currentState.queryCompleted) {
+                    processUserMessage(userInput.value);
+                    userInput.value = '';
+                }
+            });
+            
+            // Event listener for new query button
+            newQueryButton.addEventListener('click', function() {
+                resetConversation();
+            });
+            
+            // Submit feedback
+            async function submitFeedback(rating, feedback) {
+                if (!currentState.currentTestId) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/filing/feedback', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            testId: currentState.currentTestId,
+                            rating: rating,
+                            feedback: feedback
+                        }),
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to submit feedback');
+                    }
+                    
+                    // Hide the feedback container
+                    feedbackContainer.style.display = 'none';
+                    
+                    // Thank the user
+                    addBotMessage('Thank you for your feedback!');
+                    
+                } catch (error) {
+                    console.error('Error submitting feedback:', error);
+                    addBotMessage('Sorry, I had trouble submitting your feedback.');
+                }
+            }
+            
+            document.getElementById('submitFeedback').addEventListener('click', function() {
+                const feedback = document.getElementById('feedbackText').value;
+                const rating = currentState.currentRating;
+                if (rating > 0) {
+                    submitFeedback(rating, feedback);
+                } else {
+                    alert('Please select a rating before submitting.');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
