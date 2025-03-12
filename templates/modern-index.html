@@ -703,35 +703,8 @@
             
             // Reset conversation state and UI
             function resetConversation() {
-                // Reset state
-                currentState = { 
-                    company: null,
-                    formType: null,
-                    year: null,
-                    query: null,
-                    confirmed: false,
-                    currentTestId: null,
-                    currentRating: 0,
-                    queryCompleted: false
-                };
-                
-                // Enable input and send button
-                userInput.disabled = false;
-                sendButton.disabled = false;
-                sendButton.classList.remove('disabled');
-                
-                // Hide new query button
-                newQueryButton.style.display = 'none';
-                
-                // Hide feedback container
-                feedbackContainer.style.display = 'none';
-                
-                // Reset PDF display
-                pdfPlaceholder.style.display = 'flex';
-                pdfViewer.style.display = 'none';
-                
-                // Add a message to indicate reset
-                addBotMessage("I'm ready for a new question. What would you like to know?");
+                // Simply refresh the page to start fresh
+                window.location.reload();
             }
             
             // Set rating
