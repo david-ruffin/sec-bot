@@ -13,6 +13,7 @@ from datetime import datetime
 import re
 from typing import Dict, List, Optional, Union
 from azure.storage.blob import BlobServiceClient
+from datetime import datetime
 
 # Import Langchain components
 from langchain_community.llms import OpenAI
@@ -243,27 +244,34 @@ class SecFilingDownloader:
         Extract the following parameters from this query about SEC filings:
         - Company: The company name or ticker symbol mentioned
         - Form Type: The type of SEC form (e.g., 10-K, 10-Q, 8-K, etc.)
-        - Year: The year of the filing
+        - Year: The year of the filing or "latest" if referring to most recent
         - Info Type: The specific information or topic the user is asking about
         
-        If any parameter is missing, set its value to None.
+        If any parameter is missing, set its value to null.
+        If the query mentions "last", "latest", "recent", or similar terms referring to the most recent filing, set Year to "latest".
         Return the parameters as a JSON object with keys 'company', 'form_type', 'year', and 'info_type'.
         
         Query: {query}
         """
         
         self.logger.debug(f"Sending parameter extraction prompt to LLM")
-        # Get structured response from LLM
         try:
             response = self.llm.invoke(prompt)
             result = response.content.strip()
             self.logger.debug(f"LLM response for parameter extraction: {result}")
             
-            # Extract JSON from response if needed
             if '{' in result:
                 json_content = result[result.find('{'):result.rfind('}')+1]
                 try:
+                    json_content = json_content.replace(": None", ": null")
                     params = json.loads(json_content)
+                    
+                    # Handle "latest" year
+                    if params.get('year') == "latest":
+                        current_year = datetime.now().year
+                        params['year'] = str(current_year)
+                        self.logger.info(f"Converted 'latest' to current year: {params['year']}")
+                    
                     self.logger.info(f"Extracted parameters: company='{params.get('company', 'None')}', form_type='{params.get('form_type', 'None')}', year='{params.get('year', 'None')}', info_type='{params.get('info_type', 'None')}'")
                     return params
                 except json.JSONDecodeError:
@@ -272,7 +280,8 @@ class SecFilingDownloader:
             else:
                 self.logger.warning(f"No JSON found in LLM response: {result}")
             
-            # Default return if parsing fails
+            # Default return if parsing fails - don't return None values as the process_conversation 
+            # function will handle asking for missing information
             self.logger.warning("Returning default empty parameters")
             return {"company": None, "form_type": None, "year": None, "info_type": None}
         except Exception as e:
