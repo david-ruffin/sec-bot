@@ -1,0 +1,2 @@
+# Future Enhancement Suggestions
+# Add ideas here that are outside the current scope but could be valuable additions later 

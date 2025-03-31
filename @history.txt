@@ -1,0 +1,3 @@
+2023-03-31: Initial project setup. Created @roadmap.txt with goals and tasks from plan.md
+2023-03-31: Reviewed sec-bot/main.py, sec-bot/app.py, and sec-tools-and-agent/sec.py to understand the existing applications
+2023-03-31: Created Python virtual environment (.venv) in the project root directory 
